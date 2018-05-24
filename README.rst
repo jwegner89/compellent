@@ -2,10 +2,10 @@ Compellent REST Utilities
 =========================
 
 This project comprises utilities to interact with a Dell Compellent Storage
-Manager server using the REST API that the Data Collector exposes. It is
-written in Python 3, and fully tested using Python 3.6. It is likely
-compatible with earlier Python 3.x releases, but these releases have not
-been tested.
+Manager server using the REST API that the Data Collector exposes. Python 3.6 is
+a hard requirement due to some features of subprocess that I used. Python is
+available to install through most package managers (yum, apt, homebrew) or
+directly from the `Python website <https://www.python.org/downloads/>`_.
 
 The utility is accessed through the compellent module, and exposes simple
 access to query information about volumes mapped to servers, take snapshots

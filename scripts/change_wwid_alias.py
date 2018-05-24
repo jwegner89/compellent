@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python3.6
 # -*- coding: utf-8 -*-
 
 """
@@ -7,7 +7,7 @@ This script requires root privileges, so run as root or use sudo.
 This script is intended to be run on the local host.
 """
 
-from __future__ import print_function
+import argparse
 import fileinput
 import os
 import platform
@@ -15,7 +15,6 @@ import re
 import shlex
 import subprocess
 import sys
-import textwrap
 
 
 def restart_multipath(verbose=False):
@@ -42,7 +41,7 @@ def restart_multipath(verbose=False):
 
     if verbose:
         print('Reloading multipath daemon.')
-    subprocess.call(run)
+    subprocess.run(run)
 
 
 def process_aliases(wwids, wwid_aliases, verbose=False):
@@ -68,8 +67,8 @@ def process_aliases(wwids, wwid_aliases, verbose=False):
                 run = shlex.split(cmd)
                 mounted = ''
                 try:
-                    mounted = subprocess.check_output(run)
-                except subprocess.CalledProcessError:
+                    mounted = subprocess.run(run, stdout=subprocess.PIPE, encoding='utf-8').stdout
+                except subprocess.SubprocessError:
                     # this is okay, since check_ouput raises an excecption for no
                     # output, but that is our desired state
                     pass
@@ -79,12 +78,12 @@ def process_aliases(wwids, wwid_aliases, verbose=False):
 
                 if len(mounted) > 0:
                     if verbose:
-                        print(textwrap.dedent('Refusing to change alias {} to {} because it is currently mounted!'.format(current_alias, new_alias)))
+                        print('Refusing to change alias {} to {} because it is currently mounted!'.format(current_alias, new_alias))
                 else:
                     wwids[wwid] = new_alias
         else:
             # argument did not match required format
-            raise CompellentException("{} does not match the 'wwid:alias' format.".format(arg))
+            sys.exit("{} does not match the 'wwid:alias' format.".format(pair))
 
 
 def update_config(filename, wwids):
@@ -96,6 +95,8 @@ def update_config(filename, wwids):
     """
     # flag specifying current config block
     multipaths_block = False
+    # flag in case multipath block is not present
+    multipath_configured = False
     # keep track of tab and bracket levels
     tab_level = 0
     bracket_level = 0
@@ -125,9 +126,10 @@ def update_config(filename, wwids):
                 multipaths_block = False
 
         if re_multipaths.match(line):
+            multipaths_block = True
+            multipath_configured = True
             # entering multipath alias config
             print(line, end='')
-            multipaths_block = True
             tab_level += 1
             # start printing out wwid and alias configs
             for wwid, alias in wwids.items():
@@ -145,6 +147,23 @@ def update_config(filename, wwids):
             # print all other lines
             print(line, end='')
 
+    # flag was never triggering, so we need to append the multipath
+    # configuration to the end of the file
+    if not multipath_configured and wwids:
+        with open(filename, 'a', encoding='utf-8') as outfile:
+            # start with blank line for spacing and open multipaths block
+            outfile.write('\nmultipaths {\n')
+
+            # print wwid and alias config
+            for wwid, alias in wwids.items():
+                outfile.write('\tmultipath {\n')
+                outfile.write('\t\twwid\t{}\n'.format(wwid))
+                outfile.write('\t\talias\t{}\n'.format(alias))
+                outfile.write('\t}\n')
+
+            # close multipaths block
+            outfile.write('}\n')
+
 
 def wwid_alias():
     """
@@ -158,8 +177,8 @@ def wwid_alias():
     run = shlex.split(cmd)
     multipath = str()
     try:
-        multipath = subprocess.check_output(run)
-    except subprocess.CalledProcessError:
+        multipath = subprocess.run(run, stdout=subprocess.PIPE, encoding='utf-8').stdout
+    except subprocess.SubprocessError:
         # no multipath config returned
         pass
     # sample output
@@ -183,38 +202,6 @@ def wwid_alias():
     return wwids
 
 
-def print_usage():
-    """
-    Simple function to print usage details
-    """
-    print(textwrap.dedent("""\
-        usage: change_wwid_alias.py [-h] [-y] [-v] 'wwid:alias' [...]
-
-        Update wwids with new aliases.
-
-        Specify wwid and alias as pairs separated by colons.
-        For example, the following is a valid wwid:alias pair:
-            '36000d31000d5f00000000000000000a5:testvol1'
-
-        Note that this does not modify /etc/fstab, so that must be done
-        separately if the new name should be mounted at boot.
-
-        Also note that this is not idempotent; a successful run will always
-        rewrite /etc/multipath.conf with the current running configuration for
-        multipath aliases.
-
-        positional arguments:
-          wwid              WWID of multipath device to update
-          alias             new alias to associate with WWID
-
-        optional arguments:
-          -h, --help        show this help message and exit
-          -y, --assume_yes  Do not prompt for confirmation and assume yes
-          -v, --verbose     Be verbose and print status messages\
-        """)
-    )
-
-
 def main():
     """
     Function which is executed when this program is run directly
@@ -222,45 +209,58 @@ def main():
     if os.getuid() != 0:
         sys.exit('Insufficient privileges. Run this program as root.')
 
-    # flag for no prompt
-    assume_yes = False
-    # flag for verbosity
-    verbose = False
-    # iterate through args since argparse not available for Python 2.6
-    wwid_args = list()
-    for arg in sys.argv[1:]:
-        # to start, only deal with flag args; save real work for after we have
-        # wwid to alias mappings
-        if arg in ['-h', '--help']:
-            print_usage()
-            sys.exit()
-	elif arg in ['-y', '--assume_yes']:
-            assume_yes = True
-        elif arg in ['-v', '--verbose']:
-            verbose = True
-        else:
-            wwid_args.append(arg)
+    parser = argparse.ArgumentParser(
+        description="""
+            Update wwids with new aliases.
 
-    # make sure that user provides arguments
-    if len(wwid_args) < 1:
-        print_usage()
-        sys.exit()
+            Specify wwid and alias as pairs separated by colons.
+            For example, the following is a valid wwid:alias pair:
+                '36000d31000d5f00000000000000000a5:testvol1'
+
+            Note that this does not modify /etc/fstab, so that must be done
+            separately if the new name should be mounted at boot.
+
+            Also note that this is not idempotent; a successful run will always
+            rewrite /etc/multipath.conf with the current running configuration for
+            multipath aliases.
+        """
+    )
+    parser.add_argument(
+        'wwids',
+        metavar='wwid:alias',
+        type=str,
+        nargs='+',
+        help='WWID and alias pair to update',
+    )
+    parser.add_argument(
+        '-y',
+        '--assume_yes',
+        action='store_true',
+        help='Do not prompt for confirmation and assume yes',
+    )
+    parser.add_argument(
+        '-v',
+        '--verbose',
+        action='store_true',
+        help='Be verbose and print status messages',
+    )
+    args = parser.parse_args()
 
     wwids = wwid_alias()
-    process_aliases(wwids, wwid_args, verbose)
+    process_aliases(wwids, args.wwids, args.verbose)
 
-    if assume_yes:
-        if verbose:
+    if args.assume_yes:
+        if args.verbose:
             print('Updating multipath configuration file.')
         update_config('/etc/multipath.conf', wwids)
-        restart_multipath(verbose)
+        restart_multipath(args.verbose)
     else:
-        confirm = raw_input('Are you sure you want to change these aliases? (y/N) ')
+        confirm = input('Are you sure you want to change these aliases? (y/N) ')
         if confirm.lower() == 'y':
-            if verbose:
+            if args.verbose:
                 print('Updating multipath configuration file.')
             update_config('/etc/multipath.conf', wwids)
-            restart_multipath(verbose)
+            restart_multipath(args.verbose)
 
 
 if __name__ == '__main__':

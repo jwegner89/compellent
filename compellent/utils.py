@@ -4,7 +4,6 @@
 Utility functions used by other parts of the Compellent module
 """
 
-from __future__ import print_function
 import socket
 import string
 from .connection import DSMConnection, SSHConnection
@@ -15,7 +14,7 @@ def minutes_conversion(time):
     """
     Converts time-formatted strings to integer minute equivalents.
 
-    Acceptable values are of the forms [positive integer] or
+    Acceptable values are of the forms [positive integer] or 
     [positive integer][modifier], where [modifier] are short subsitutions
     for a time period. Modifier values are as follows:
 
@@ -65,16 +64,15 @@ def minutes_conversion(time):
     multiplier = None
     if modifier == 'h':
         multiplier = 60
-    if modifier == 'd':
+    elif modifier == 'd':
         multiplier = 24 * 60
-    if modifier == 'w':
+    elif modifier == 'w':
         multiplier = 7 * 24 * 60
-    if modifier == 'm':
+    elif modifier == 'm':
         multiplier = 30 * 24 * 60
-    if modifier == 'y':
+    elif modifier == 'y':
         multiplier = 365 * 24 * 60
-
-    if not multiplier:
+    else:
         raise CompellentException('Multiplier not assigned correctly')
 
     return value * multiplier
@@ -147,17 +145,20 @@ def refresh(dsm, ssh, src_server, dest_server, volume, environment, mountpoint):
     if src_server == dest_server:
         raise CompellentException('Source cannot be the same as destination')
 
+    if 'prd' in dest_server:
+        raise CompellentException('We do not allow refreshing to production servers')
+
     # ensure that provided source and target servers are resolvable
     src_short, src_fqdn = resolve_host(src_server)
     dest_short, dest_fqdn = resolve_host(dest_server)
 
-    ### TODO: replace organization-specific logic
+    ### TODO: remove organization-specific logic
     mount = mountpoint
-    if '/mnt/' == mount[:7]:
+    if '/' in mount:
         mount = mount.split('/')[-1]
-    elif '_' in mount:
+    if '-' in mount:
         mount = mount.split('-')[-1]
-    elif '_' in mount:
+    if '_' in mount:
         mount = mount.split('_')[-1]
 
     date_string = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
@@ -205,7 +206,7 @@ def refresh(dsm, ssh, src_server, dest_server, volume, environment, mountpoint):
     # create view volume from snapshot, retain new volume ID
     dest_volume = dsm.view_volume(src_snapshot['instanceId'], vol_name, folder['instanceId'])
     # change dest_volume's storage profile to recommended/all tiers
-    recommended_profile = self.sc_id + '.1'
+    recommended_profile = dsm.sc_id + '.1'
     dsm.modify_volume_configuration()
     # map view volume to dest
     # change filesystem UUID to prevent future clone errors

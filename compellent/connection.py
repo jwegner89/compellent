@@ -4,7 +4,6 @@
 Operations using a connection to the Dell Storage Manager server
 """
 
-from __future__ import print_function
 import datetime
 import fnmatch
 import json
@@ -34,7 +33,7 @@ class DSMConnection:
         self.user = None
         self.password = None
         self.api_version = None
-        self.verify_certificate = True
+        self.verify = True
         self.timeout = None
         self.connection = None
         self.base_url = None
@@ -52,8 +51,7 @@ class DSMConnection:
         """
         Required for use as a context manager
         """
-        if self.connection:
-            self.connection.close()
+        self.disconnect()
 
 
     def connect(self):
@@ -63,7 +61,7 @@ class DSMConnection:
         :raises CompellentException: catch-all exception for Compellent module
         """
         # disable warnings from requests module
-        if not self.verify_certificate:
+        if not self.verify:
             requests.packages.urllib3.disable_warnings()
 
         # define base URL for DSM REST API interface
@@ -87,13 +85,33 @@ class DSMConnection:
             self.connection.post(
                 complete_url,
                 headers=self.headers,
-                verify=self.verify_certificate,
+                verify=self.verify,
                 timeout=self.timeout,
             )
         except:
             self.connection.close()
-            raise CompellentException(
-                'Unable to login: timeout exceeded or invalid credentials')
+            raise CompellentException('Unable to login: timeout exceeded or invalid credentials')
+
+
+    def disconnect(self):
+        """
+        Logout from the Dell Storage Manager
+
+        :raises CompellentException: catch-all exception for Compellent module
+        """
+        path = '/ApiConnection/Logout'
+        complete_url = '{}{}'.format(self.base_url, path)
+        try:
+            self.connection.post(
+                complete_url,
+                headers=self.headers,
+                verify=self.verify,
+                timeout=self.timeout,
+            )
+        except:
+            pass
+        if self.connection:
+            self.connection.close()
 
 
     def check_response(self, response):
@@ -120,12 +138,11 @@ class DSMConnection:
             response = self.connection.get(
                 complete_url,
                 headers=self.headers,
-                verify=self.verify_certificate,
+                verify=self.verify,
                 timeout=self.timeout,
             )
         except:
-            raise CompellentException(
-                'Exceeded timeout during request: {}'.format(complete_url))
+            raise CompellentException('Exceeded timeout during request: {}'.format(complete_url))
         return response.json()
 
 
@@ -164,12 +181,11 @@ class DSMConnection:
             response = self.connection.get(
                 complete_url,
                 headers=self.headers,
-                verify=self.verify_certificate,
+                verify=self.verify,
                 timeout=self.timeout,
             )
         except:
-            raise CompellentException(
-                'Exceeded timeout during request: {}'.format(complete_url))
+            raise CompellentException('Exceeded timeout during request: {}'.format(complete_url))
         return response.json()
 
 
@@ -190,7 +206,7 @@ class DSMConnection:
             response = self.connection.get(
                 complete_url,
                 headers=self.headers,
-                verify=self.verify_certificate,
+                verify=self.verify,
                 timeout=self.timeout,
             )
         except:
@@ -242,7 +258,7 @@ class DSMConnection:
                 complete_url,
                 data=json.dumps(data, ensure_ascii=False).encode('utf-8'),
                 headers=self.headers,
-                verify=self.verify_certificate,
+                verify=self.verify,
                 timeout=self.timeout,
             )
         except:
@@ -263,7 +279,7 @@ class DSMConnection:
             response = self.connection.get(
                 complete_url,
                 headers=self.headers,
-                verify=self.verify_certificate,
+                verify=self.verify,
                 timeout=self.timeout,
             )
         except:
@@ -295,12 +311,11 @@ class DSMConnection:
                 complete_url,
                 data=json.dumps(data, ensure_ascii=False).encode('utf-8'),
                 headers=self.headers,
-                verify=self.verify_certificate,
+                verify=self.verify,
                 timeout=self.timeout,
             )
         except:
-            raise CompellentException(
-                'Timeout exceeded while mapping server to volume.')
+            raise CompellentException('Timeout exceeded while mapping server to volume.')
         return response.json()
 
 
@@ -324,12 +339,11 @@ class DSMConnection:
                     response = self.connection.delete(
                         complete_url,
                         headers=self.headers,
-                        verify=self.verify_certificate,
+                        verify=self.verify,
                         timeout=self.timeout,
                     )
                 except:
-                    raise CompellentException(
-                        'Timeout exceeded while deleting mapping profile.')
+                    raise CompellentException('Timeout exceeded while deleting mapping profile.')
 
 
     def recycle_volume(self, volume_id):
@@ -345,12 +359,11 @@ class DSMConnection:
             response = self.connection.post(
                 complete_url,
                 headers=self.headers,
-                verify=self.verify_certificate,
+                verify=self.verify,
                 timeout=self.timeout,
             )
         except:
-            raise CompellentException(
-                'Timeout exceeded while recycling volume with ID {}.'.format(volume_id))
+            raise CompellentException('Timeout exceeded while recycling volume with ID {}.'.format(volume_id))
 
 
     def search_volume(self, volume_name):
@@ -392,7 +405,7 @@ class DSMConnection:
                 complete_url,
                 data=json.dumps(data, ensure_ascii=False).encode('utf-8'),
                 headers=self.headers,
-                verify=self.verify_certificate,
+                verify=self.verify,
                 timeout=self.timeout,
             )
         except:
@@ -413,12 +426,11 @@ class DSMConnection:
             response = self.connection.get(
                 complete_url,
                 headers=self.headers,
-                verify=self.verify_certificate,
+                verify=self.verify,
                 timeout=self.timeout,
             )
         except:
-            raise CompellentException(
-                'Exceeded timeout during request: {}'.format(complete_url))
+            raise CompellentException('Exceeded timeout during request: {}'.format(complete_url))
         return response.json()
 
 
@@ -440,6 +452,46 @@ class DSMConnection:
                 if fnmatch.fnmatch(server['name'], server_name):
                     matches.append(server)
         return matches
+
+
+    def get_server(self, server_name):
+        """
+        Retrieve server object with name server_name.
+
+        :param str server_name: name of server to retrieve
+        :raises CompellentException: Compellent module catch-all exception
+        :return: server object corresponding to server_name
+        """
+        data = {
+            'filter': {
+                'filterType': 'AND',
+                'filters': [
+                    {
+                        'attributeName': 'scSerialNumber',
+                        'attributeValue': self.sc_id,
+                        'filterType': 'Equals'
+                    },
+                    {
+                        'attributeName': 'instanceName',
+                        'attributeValue': server_name,
+                        'filterType': 'Equals'
+                    },
+                ],
+            },
+        }
+        path = '/StorageCenter/ScServer/GetList'
+        complete_url = '{}{}'.format(base_url, path)
+        try:
+            response = connection.post(
+                complete_url,
+                data=json.dumps(data, ensure_ascii=False).encode('utf-8'),
+                headers=self.headers,
+                verify=self.verify,
+                timeout=self.timeout,
+            )
+        except:
+            raise DellStorageException('Exceeded 10 second timeout during request: {}'.format(complete_url))
+        return response.json()
 
 
     def snapshot(self, volume, description, expiration='1w'):
@@ -464,12 +516,11 @@ class DSMConnection:
                 complete_url,
                 data=json.dumps(data, ensure_ascii=False).encode('utf-8'),
                 headers=self.headers,
-                verify=self.verify_certificate,
+                verify=self.verify,
                 timeout=self.timeout,
             )
         except:
-            raise CompellentException(
-                'Exceeded timeout during request: {}'.format(complete_url))
+            raise CompellentException('Exceeded timeout during request: {}'.format(complete_url))
         return response.json()
 
 
@@ -540,16 +591,23 @@ class SSHConnection:
             self.connection.close()
 
 
-    def update_repo(self):
+    def mountpoint_to_serial(self, mountpoint):
         """
-        Update the compellent repository with the latest version on the
-        remote host.
+        Determine the Compellent serial number of the specified mountpoint.
 
+        :param str mountpoint: mountpoint of Compellent device
+        :return: string representing the Compellent serial number of the device
         :raises CompellentException: catch-all exception for Compellent module
         """
+	# find device name of mountpoint
+        stdin, stdout, stderr = self.connection.exec_command('findmnt --noheadings --list --output SOURCE {}'.format(args.mountpoint))
+        device = stdout.read().decode('utf-8').strip()
 
-        if not self.connection:
-            raise CompellentException('Connection is not established yet!')
+        # find serial number of device
+        stdin, stdout, stderr = self.connection.exec_command('lsblk --noheadings --list --output SERIAL {}'.format(device))
+        serial = stdout.read().decode('utf-8').strip()
+
+        return(serial)
 
 
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4

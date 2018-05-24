@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python3.6
 # -*- coding: utf-8 -*-
 
 """
@@ -9,7 +9,7 @@ This script requires root privileges, so run it as root or use sudo.
 This script is intended to be run on the local host.
 """
 
-from __future__ import print_function
+import argparse
 import os
 import re
 import shlex
@@ -34,8 +34,12 @@ def disk_associations():
     run = shlex.split(cmd)
     multipath_devices = str()
     try:
-        multipath_devices = subprocess.check_output(run)
-    except subprocess.CalledProcessError:
+        multipath_devices = subprocess.run(
+            run,
+            stdout=subprocess.PIPE,
+            encoding='utf-8',
+        ).stdout
+    except subprocess.SubprocessError:
         # no multipath aliases returned
         pass
     # sample output
@@ -50,8 +54,12 @@ def disk_associations():
         run = shlex.split(cmd)
         multipath_info = str()
         try:
-            multipath_info = subprocess.check_output(run)
-        except subprocess.CalledProcessError:
+            multipath_info = subprocess.run(
+                run,
+                stdout=subprocess.PIPE,
+                encoding='utf-8',
+            ).stdout
+        except subprocess.SubprocessError:
             # no multipath info returned
             pass
         # sample output
@@ -75,8 +83,12 @@ def disk_associations():
     run = shlex.split(cmd)
     mounted_devices = str()
     try:
-        mounted_devices = subprocess.check_output(run)
-    except subprocess.CalledProcessError:
+        mounted_devices = subprocess.run(
+            run,
+            stdout=subprocess.PIPE,
+            encoding='utf-8',
+        ).stdout
+    except subprocess.SubprocessError:
         # no mounted disks returned
         pass
     # sample output
@@ -105,8 +117,12 @@ def disk_associations():
     run = shlex.split(cmd)
     lvm_disks = str()
     try:
-        lvm_disks = subprocess.check_output(run)
-    except subprocess.CalledProcessError:
+        lvm_disks = subprocess.run(
+            run,
+            stdout=subprocess.PIPE,
+            encoding='utf-8',
+        ).stdout
+    except subprocess.SubprocessError:
         # no lvm disks returned
         pass
     # sample output
@@ -123,7 +139,7 @@ def disk_associations():
     return(disk_mappings)
 
 
-def delete_devices(disks, aliases, assume_yes=True, verbose=False):
+def delete_devices(disks, aliases, assume_yes=False, verbose=False):
     """
     Delete specified block devices from local system
 
@@ -145,8 +161,7 @@ def delete_devices(disks, aliases, assume_yes=True, verbose=False):
             group_disks = device_groups[group]
             if disk in group_disks:
                 if verbose:
-                    print('Disk {disk} is a part of the multipath device {alias}. Adding the other disks from {alias}.\
-                        '.format(alias=group, disk=disk))
+                    print('Disk {disk} is a part of the multipath device {alias}. Adding the other disks from {alias}.'.format(alias=group, disk=disk))
                 aliases.add(group)
                 disks |= group_disks
 
@@ -154,8 +169,7 @@ def delete_devices(disks, aliases, assume_yes=True, verbose=False):
     selected_protected_devices = (protected_devices & disks) | (protected_devices & aliases)
     if selected_protected_devices:
         if verbose:
-            refusal_message = 'Refusing to delete the following protected devices: {}'.format(
-                ' '.join(selected_protected_devices))
+            refusal_message = 'Refusing to delete the following protected devices: {}'.format(' '.join(selected_protected_devices))
             print(refusal_message)
         # remove system disks from disks to process
         aliases -= protected_devices
@@ -170,7 +184,7 @@ def delete_devices(disks, aliases, assume_yes=True, verbose=False):
         for alias in aliases:
             cmd = 'multipath -f {}'.format(alias)
             run = shlex.split(cmd)
-            exit_code = subprocess.call(run)
+            exit_code = subprocess.run(run).returncode
             if exit_code != 0:
                 print('Error: cannot flush multipath device {}'.format(alias))
         if verbose:
@@ -195,7 +209,7 @@ def delete_devices(disks, aliases, assume_yes=True, verbose=False):
             for alias in aliases:
                 cmd = 'multipath -f {}'.format(alias)
                 run = shlex.split(cmd)
-                exit_code = subprocess.call(run)
+                exit_code = subprocess.run(run).returncode
                 if exit_code != 0:
                     print('Error: cannot flush multipath device {}'.format(alias))
             if verbose:
@@ -207,33 +221,6 @@ def delete_devices(disks, aliases, assume_yes=True, verbose=False):
                     outfile.write('1\n')
 
 
-def print_usage():
-    """
-    Simple function to print usage details
-    """
-    print(textwrap.dedent("""\
-        usage: delete_devices.py [-h] [-y] [-v] [-d sdX [sdX ...]] [-m alias [alias ...]]
-
-        Delete disks specified as arguments. Both standard block devices and
-        multipath device aliases are accepted as parameters.
-
-        Be very careful, as this can destroy data if the wrong device is specified!
-        There are protections in place to prevent the deletion of currently mounted
-        filesystems, but still use caution.
-
-        optional arguments:
-          -s sdX [sdX ...], --standard sdX [sdX ...]
-                            standard block devices to remove
-          -m alias [alias ...], --multipath alias [alias ...]
-                            multipath devices to remove
-          -h, --help        show this help message and exit
-          -y, --assume_yes  Do not prompt for confirmation and assume yes.
-                            Use caution, this can destroy your data!
-          -v, --verbose     Be verbose and print status messages\
-        """)
-    )
-
-
 def main():
     """
     Function which is executed when this program is run directly
@@ -241,11 +228,46 @@ def main():
     if os.getuid() != 0:
         sys.exit('Insufficient privileges. Run this program as root.')
 
-    # flag for no prompt
-    assume_yes = False
-    # flag for verbosity
-    verbose = False
-    # sets of disks and aliases given as arguments
+    parser = argparse.ArgumentParser(
+        description="""
+            Delete disks specified as arguments. Both standard block devices and
+            multipath device aliases are accepted as parameters.
+
+            Be very careful, as this can destroy data if the wrong device is specified!
+            There are protections in place to prevent the deletion of currently mounted
+            filesystems, but still use caution.
+        """
+    )
+    parser.add_argument(
+        '-s',
+        '--standard',
+        metavar='sdX',
+        type=str,
+        nargs='+',
+        help='standard block devices to remove',
+    )
+    parser.add_argument(
+        '-m',
+        '--multipath',
+        metavar='alias',
+        type=str,
+        nargs='+',
+        help='multipath devices to remove',
+    )
+    parser.add_argument(
+        '-y',
+        '--assume_yes',
+        action='store_true',
+        help='Do not prompt for confirmation and assume yes',
+    )
+    parser.add_argument(
+        '-v',
+        '--verbose',
+        action='store_true',
+        help='Be verbose and print status messages',
+    )
+    args = parser.parse_args()
+
     disks = set()
     aliases = set()
     # valid devices to accept as parameters
@@ -260,43 +282,20 @@ def main():
     run = shlex.split(cmd)
     multipath_devices = str()
     try:
-        multipath_devices = subprocess.check_output(run)
-    except subprocess.CalledProcessError:
+        multipath_devices = subprocess.run(
+            run,
+            stdout=subprocess.PIPE,
+            encoding='utf-8',
+        ).stdout
+    except subprocess.SubprocessError:
         # no multipath aliases returned
         pass
+    valid_multipaths = multipath_devices.split()
 
-    # flags for processing standard vs multipath devices
-    standard = False
-    multipath = False
-    # iterate through args since argparse not always available for Python 2.6
-    for arg in sys.argv[1:]:
-        if arg in ['-h', '--help']:
-            print_usage()
-            sys.exit()
-            standard = False
-            multipath = False
-
-	elif arg in ['-y', '--assume_yes']:
-            assume_yes = True
-            standard = False
-            multipath = False
-
-        elif arg in ['-v', '--verbose']:
-            verbose = True
-            standard = False
-            multipath = False
-
-        elif arg in ['-s', '--standard']:
-            standard = True
-            multipath = False
-
-        elif arg in ['-m', '--multipath']:
-            multipath = True
-            standard = False
-
-        elif standard:
-            if arg in valid_disks:
-                disks.add(arg)
+    if args.standard:
+        for disk in args.standard:
+            if disk in valid_disks:
+                disks.add(disk)
             else:
                 sys.exit(
                     textwrap.dedent(
@@ -304,15 +303,16 @@ def main():
                         Invalid block device: {}
                         Choose from the following devices: {}\
                         """.format(
-                            arg, 
+                            disk, 
                             ' '.join(valid_disks),
                         )
                     )
                 )
 
-        elif multipath:
-            if arg in multipath_devices:
-                aliases.add(arg)
+    if args.multipath:
+        for alias in args.multipath:
+            if alias in valid_multipaths:
+                aliases.add(alias)
             else:
                 sys.exit(
                     textwrap.dedent(
@@ -320,22 +320,17 @@ def main():
                         Invalid multipath alias: {}
                         Choose from the following aliases: {}\
                         """.format(
-                            arg,
+                            alias,
                             ' '.join(multipath_devices.splitlines()),
                         )
                     )
                 )
 
-        else:
-            print('Error: unrecognized argument {}'.format(arg))
-            print_usage()
-            sys.exit(1)
-
     # ensure at least one alias or disk selected
     if not disks and not aliases:
         sys.exit('Select at least one disk or alias.')
 
-    delete_devices(disks, aliases, assume_yes, verbose)
+    delete_devices(disks, aliases, args.assume_yes, args.verbose)
 
 
 if __name__ == '__main__':
